@@ -21,13 +21,13 @@ void c_reset()
     controller_init_check = true;
     cmd_rcv = false;
 
-    sim_time_now_ros = ros::Duration(d->time);
+    sim_time_now_ros = rclcpp::Duration(std::chrono::nanoseconds(static_cast<int64_t>(d->time * 1e9)));;
 
     mujoco_ros_connector_init();
     mj_forward(m, d);
 
-    sim_time_ros = ros::Duration(d->time);
-    sim_time_run = ros::Time::now();
+    sim_time_ros = rclcpp::Duration(std::chrono::nanoseconds(static_cast<int64_t>(d->time * 1e9)));;
+    sim_time_run = nh->now();
 
     profilerupdate();
     sensorupdate();
@@ -44,31 +44,31 @@ void c_reset()
 
 //---------------------callback functions --------------------------------
 
-void jointset_callback(const mujoco_ros_msgs::JointSetConstPtr &msg)
+void jointset_callback(const mujoco_ros_msgs::msg::JointSet::SharedPtr msg)
 {
 
-    com_time = ros::Time::now().toSec() - msg->header.stamp.toSec();
+    com_time = nh->now().seconds() - rclcpp::Time(msg->header.stamp).seconds();
     dif_time = d->time - msg->time;
     cmd_rcv = true;
 
     sim_cons_time = dif_time;
-
-    ROS_INFO_COND(settings.debug, "TIME INFORMATION :::: state time : %10.5f , command time : %10.5f, time dif : %10.5f , com time : %10.5f ", msg->time, d->time, dif_time, com_time);
-
+    if (settings.debug) {
+        RCLCPP_INFO(nh->get_logger(), "TIME INFORMATION :::: state time : %10.5f , command time : %10.5f, time dif : %10.5f , com time : %10.5f ", msg->time, d->time, dif_time, com_time);
+    }
     if ((msg->time) > (d->time))
     {
-        ROS_ERROR("JOINT SET COMMAND IS IN FUTURE : current sim time : %10.5f command time : %10.5f", d->time, msg->time);
+        RCLCPP_ERROR(nh->get_logger(), "JOINT SET COMMAND IS IN FUTURE : current sim time : %10.5f command time : %10.5f", d->time, msg->time);
         cmd_rcv = false;
     }
     else if ((msg->time + 0.01) < (d->time))
     {
-        ROS_ERROR("Sim time and Command time error exceeds 0.01 sim time : %10.5f command time : %10.5f", d->time, msg->time);
+        RCLCPP_ERROR(nh->get_logger(), "Sim time and Command time error exceeds 0.01 sim time : %10.5f command time : %10.5f", d->time, msg->time);
     }
     else
     {
         //MODE 0 position
         //MODE 1 torque
-        if (msg->MODE == 1)
+        if (msg->mode == 1)
         {
             if (joint_set_msg_.torque.size() == m->nu)
             {
@@ -77,10 +77,10 @@ void jointset_callback(const mujoco_ros_msgs::JointSetConstPtr &msg)
             }
             else
             {
-                ROS_ERROR("TORQUE_MODE :::: Actuator Size Not match ");
+                RCLCPP_ERROR(nh->get_logger(), "TORQUE_MODE :::: Actuator Size Not match ");
             }
         }
-        else if (msg->MODE == 0)
+        else if (msg->mode == 0)
         {
             if (joint_set_msg_.torque.size() == m->nu)
             {
@@ -89,13 +89,13 @@ void jointset_callback(const mujoco_ros_msgs::JointSetConstPtr &msg)
             }
             else
             {
-                ROS_ERROR("POSITION_MODE ::::  Actuator Size Not match ");
+                RCLCPP_ERROR(nh->get_logger(), "POSITION_MODE ::::  Actuator Size Not match ");
             }
         }
     }
 }
 
-void sim_command_callback(const std_msgs::StringConstPtr &msg)
+void sim_command_callback(const std_msgs::msg::String::SharedPtr msg)
 {
     std::cout << "MSG FROM CONTROLLER " << msg->data << std::endl;
 
@@ -128,17 +128,17 @@ void sim_command_callback(const std_msgs::StringConstPtr &msg)
     }
 }
 
-void force_apply_callback(const mujoco_ros_msgs::applyforce &msg)
+void force_apply_callback(const mujoco_ros_msgs::msg::ApplyForce::SharedPtr msg)
 {
 
-    applied_ext_force_[0] = msg.wrench.force.x;
-    applied_ext_force_[1] = msg.wrench.force.y;
-    applied_ext_force_[2] = msg.wrench.force.z;
-    applied_ext_force_[3] = msg.wrench.torque.x;
-    applied_ext_force_[4] = msg.wrench.torque.y;
-    applied_ext_force_[5] = msg.wrench.torque.z;
+    applied_ext_force_[0] = msg->wrench.force.x;
+    applied_ext_force_[1] = msg->wrench.force.y;
+    applied_ext_force_[2] = msg->wrench.force.z;
+    applied_ext_force_[3] = msg->wrench.torque.x;
+    applied_ext_force_[4] = msg->wrench.torque.y;
+    applied_ext_force_[5] = msg->wrench.torque.z;
 
-    force_appiedd_link_idx_ = msg.link_idx;
+    force_appiedd_link_idx_ = msg->link_idx;
 
     ext_force_applied_ = true;
 }
@@ -177,7 +177,7 @@ void state_publisher_init()
 
     if (m->jnt_type[0] == 0) //if first joint type is floating.
     {
-        ROS_INFO("ROBOT is floating !");
+        RCLCPP_INFO(nh->get_logger(), "ROBOT is floating !");
         joint_state_msg_.name.resize(m->nu + 6);
         joint_state_msg_.position.resize(m->nu + 7);
         joint_state_msg_.velocity.resize(m->nu + 6);
@@ -200,20 +200,20 @@ void state_publisher_init()
     }
     else if ((m->jnt_type[0] == 2) || (m->jnt_type[0] == 3))
     {
-        ROS_INFO("ROBOT is fixed !");
+        RCLCPP_INFO(nh->get_logger(), "ROBOT is fixed !");
 
         for (int i = 0; i < m->njnt; i++)
         {
             if ((m->jnt_type[i] != 3) && (m->jnt_type[i] != 2))
             {
-                ROS_ERROR("The robot contains ball/free type of joint in the middle. \n Current state publisher doesn't support this type of robot. \n Copy following line and contact me for update : june992@snu.ac.kr ");
-                ROS_ERROR("Total number of generalized coordinates(qpos) : %d", m->nq);
-                ROS_ERROR("Total number of degrees of freedom(qvel) : %d", m->nv);
-                ROS_ERROR("Total number of actuator : %d ", m->nu);
-                ROS_ERROR("Total Joint number is : %d ", m->njnt);
+                RCLCPP_ERROR(nh->get_logger(), "The robot contains ball/free type of joint in the middle. \n Current state publisher doesn't support this type of robot. \n Copy following line and contact me for update : june992@snu.ac.kr ");
+                RCLCPP_ERROR(nh->get_logger(), "Total number of generalized coordinates(qpos) : %d", m->nq);
+                RCLCPP_ERROR(nh->get_logger(), "Total number of degrees of freedom(qvel) : %d", m->nv);
+                RCLCPP_ERROR(nh->get_logger(), "Total number of actuator : %d ", m->nu);
+                RCLCPP_ERROR(nh->get_logger(), "Total Joint number is : %d ", m->njnt);
                 for (int i = 0; i < m->njnt; i++)
                 {
-                    ROS_ERROR("Joint %d - Type : %d", i, m->jnt_type[i]);
+                    RCLCPP_ERROR(nh->get_logger(), "Joint %d - Type : %d", i, m->jnt_type[i]);
                 }
             }
         }
@@ -323,16 +323,16 @@ void state_publisher()
             sim_status_msg_.sensor = sensor_state_msg_.sensor;
             sim_status_msg_.time = d->time;
 
-            sim_status_msg_.header.stamp = ros::Time::now();
-            sim_status_pub.publish(sim_status_msg_);
+            sim_status_msg_.header.stamp = nh->now();
+            sim_status_pub->publish(sim_status_msg_);
         }
         else
         {
-            joint_state_msg_.header.stamp = ros::Time::now();
-            sensor_state_msg_.header.stamp = ros::Time::now();
-            sensor_state_pub.publish(sensor_state_msg_);
-            joint_state_pub.publish(joint_state_msg_);
-            sim_time_pub.publish(sim_time);
+            joint_state_msg_.header.stamp = nh->now();
+            sensor_state_msg_.header.stamp = nh->now();
+            sensor_state_pub->publish(sensor_state_msg_);
+            joint_state_pub->publish(joint_state_msg_);
+            sim_time_pub->publish(sim_time);
         }
     }
     else
@@ -437,30 +437,30 @@ void state_publisher()
 void mycontrollerinit()
 {
     ros_sim_started = true;
-    sync_time_test = ros::Time::now();
+    sync_time_test = nh->now();
 }
 void mujoco_ros_connector_init()
 {
-    std::cout << "::::::::::::::::::::: MUJOCO_ROS_CONNECTOR INITIALIZE ::::::::::::::::::::" << std::endl;
+    std::cout << "::::::::::::::::::::: MUJOCO_ROS2_CONNECTOR INITIALIZE ::::::::::::::::::::" << std::endl;
 
-    std_msgs::String rst_msg_;
+    std_msgs::msg::String rst_msg_;
     rst_msg_.data = "RESET";
-    sim_command_pub.publish(rst_msg_);
+    sim_command_pub->publish(rst_msg_);
     std::cout << " CONTROLLER RESET COMMAND " << std::endl;
 
-    ros::Rate poll_r(60);
-    ros::Time wait_time;
-    wait_time = ros::Time::now();
+    rclcpp::Rate poll_r(60);
+    rclcpp::Time wait_time;
+    wait_time = nh->now();
 
-    while ((controller_reset_check) && ((ros::Time::now() - wait_time).toSec() < 1.0))
+    while ((controller_reset_check) && ((nh->now() - wait_time).seconds() < 1.0))
     {
-        ros::spinOnce();
+        rclcpp::spin_some(nh);
         poll_r.sleep();
     }
-    if (!((ros::Time::now() - wait_time).toSec() < 1.0))
+    if (!((nh->now() - wait_time).seconds() < 1.0))
     {
 
-        ROS_ERROR("NO RESPONSE FROM CONTROLLER ");
+        RCLCPP_ERROR(nh->get_logger(), "NO RESPONSE FROM CONTROLLER ");
     }
 
     state_publisher_init();
@@ -471,21 +471,21 @@ void mujoco_ros_connector_init()
     std::cout << " PUBLISH TEST COMPLETE" << std::endl;
 
     rst_msg_.data = "INIT";
-    sim_command_pub.publish(rst_msg_);
-    wait_time = ros::Time::now();
-    while ((controller_init_check) && ((ros::Time::now() - wait_time).toSec() < 1.0))
+    sim_command_pub->publish(rst_msg_);
+    wait_time = nh->now();
+    while ((controller_init_check) && ((nh->now() - wait_time).seconds() < 1.0))
     {
-        ros::spinOnce();
+        rclcpp::spin_some(nh);
         poll_r.sleep();
     }
 
     mjcb_control = mycontroller;
     mycontrollerinit();
-    std::cout << " MUJOCO_ROS_CONNTECTOR INITIALIZE COMPLETE" << std::endl;
+    std::cout << " MUJOCO_ROS2_CONNTECTOR INITIALIZE COMPLETE" << std::endl;
 
     if ((!controller_init_check) && (!controller_reset_check))
     {
-        ROS_INFO("CONNECT COMPLETE");
+        RCLCPP_INFO(nh->get_logger(), "CONNECT COMPLETE");
         ctrlstat = "CONNECTED";
     }
     else
@@ -499,7 +499,7 @@ void mujoco_ros_connector_init()
 
 void mycontroller(const mjModel *m, mjData *d)
 {
-    ros::spinOnce();
+    rclcpp::spin_some(nh);
 
     if (settings.run)
     {
@@ -507,8 +507,8 @@ void mycontroller(const mjModel *m, mjData *d)
         {
             state_publisher();
             double ros_time_now, ros_time_avatar_mode11;
-            ros_time_now = ros::Time::now().toSec();
-            // ros::param::get("tocabi_avatar_thread11_start_time", ros_time_avatar_mode11);
+            ros_time_now = nh->now().seconds();
+            // rclcpp::param::get("tocabi_avatar_thread11_start_time", ros_time_avatar_mode11);
             //apply force (dg add)
             int link_idx = 6*force_appiedd_link_idx_;
             if( ext_force_applied_ )
@@ -581,10 +581,10 @@ void mycontroller(const mjModel *m, mjData *d)
                     mju_copy(d->xfrc_applied, ctrl_command2, m->nbody * 6);
                 }
             }
-
-            ROS_INFO_COND(settings.debug == 1, "MJ_TIME:%10.5f ros:%10.5f dif:%10.5f", d->time, ros_sim_runtime.toSec(), d->time - ros_sim_runtime.toSec());
-            ROS_INFO_COND(settings.debug == 1, "TEST FOR THERE ");
-
+            if (settings.debug) {
+                RCLCPP_INFO(nh->get_logger(), "MJ_TIME:%10.5f ros:%10.5f dif:%10.5f", d->time, ros_sim_runtime.seconds(), d->time - ros_sim_runtime.seconds());
+                RCLCPP_INFO(nh->get_logger(), "TEST FOR THERE ");
+            }
             if (settings.debug == 1)
             {
                 std::cout << "command torque " << std::endl;
@@ -598,21 +598,21 @@ void mycontroller(const mjModel *m, mjData *d)
             static std::chrono::high_resolution_clock::time_point t_before = std::chrono::high_resolution_clock::now();
             std::chrono::high_resolution_clock::time_point rt_now = std::chrono::high_resolution_clock::now();
 
-            //static double t_before = ros::Time::now().toSec();
-            //double rt_now = ros::Time::now().toSec();
+            //static double t_before = nh->now().seconds();
+            //double rt_now = nh->now().seconds();
 
             if (settings.timecheck)
             {
-                std::cout << "rdif : " << std::setw(8) << (double)(rt_now - t_before).count() / 1000000.0 << "ms \t t_now : " << d->time << " \t r_now : " << ros::Time::now().toSec() - sync_time_test.toSec() << " \t t dif : " << ros::Time::now().toSec() - sync_time_test.toSec() - d->time << std::endl;
+                std::cout << "rdif : " << std::setw(8) << (double)(rt_now - t_before).count() / 1000000.0 << "ms \t t_now : " << d->time << " \t r_now : " << nh->now().seconds() - sync_time_test.seconds() << " \t t dif : " << nh->now().seconds() - sync_time_test.seconds() - d->time << std::endl;
             }
 
             t_before = rt_now;
         }
     }
-    //ros::V_string temp;
-    //ros::master::getNodes(temp);
+    //rclcpp::V_string temp;
+    //rclcpp::master::getNodes(temp);
 
-    //ROS_INFO("mycon :: time %f ", d->time);
+    //RCLCPP_INFO(nh->get_logger(), "mycon :: time %f ", d->time);
     //for (int i = 0; i < temp.size(); i++)
     //    std::cout << temp[i] << std::endl;
 }
@@ -957,11 +957,11 @@ void infotext(char *title, char *content, double interval)
     {
         if (pause_check)
         {
-            sim_time_ros = ros::Duration(d->time);
-            sim_time_run = ros::Time::now();
+            sim_time_ros = rclcpp::Duration(std::chrono::nanoseconds(static_cast<int64_t>(d->time * 1e9)));
+            sim_time_run = nh->now();
         }
         pause_check = false;
-        sim_time_now_ros = ros::Time::now() - sim_time_run + sim_time_ros;
+        sim_time_now_ros = nh->now() - sim_time_run + sim_time_ros;
     }
     else
     {
@@ -971,7 +971,7 @@ void infotext(char *title, char *content, double interval)
     // prepare info text
     strcpy(title, "Time\nRTime\nt_diff\nSize\nCPU\nSolver   \nFPS\nstack\nconbuf\nefcbuf\nController\ntdiff");
     sprintf(content, "%-20.5f\n%-20.5f\n%-20.5f\n%d  (%d con)\n%.3f\n%.1f  (%d it)\n%.0f\n%.3f\n%.3f\n%.3f\n%s\n%-20.6f",
-            d->time, sim_time_now_ros.toSec(), sim_time_now_ros.toSec() - d->time,
+            d->time, sim_time_now_ros.seconds(), sim_time_now_ros.seconds() - d->time,
             d->nefc, d->ncon,
             settings.run ? d->timer[mjTIMER_STEP].duration / mjMAX(1, d->timer[mjTIMER_STEP].number) : d->timer[mjTIMER_FORWARD].duration / mjMAX(1, d->timer[mjTIMER_FORWARD].number),
             solerr, d->solver_iter,
@@ -1164,7 +1164,7 @@ void makerendering(int oldstate)
             }
 
         // set shortcut and data
-        sprintf(defFlag[0].other, " %s", mjVISSTRING[i][2]);
+            sprintf(defFlag[0].other, " %s", mjVISSTRING[i][2]);
         defFlag[0].pdata = vopt.flags + i;
         mjui_add(&ui0, defFlag);
     }
@@ -1172,7 +1172,7 @@ void makerendering(int oldstate)
     for (i = 0; i < mjNRNDFLAG; i++)
     {
         strcpy(defFlag[0].name, mjRNDSTRING[i][0]);
-        sprintf(defFlag[0].other, " %s", mjRNDSTRING[i][2]);
+            sprintf(defFlag[0].other, " %s", mjRNDSTRING[i][2]);
         defFlag[0].pdata = scn.flags + i;
         mjui_add(&ui0, defFlag);
     }
@@ -1394,7 +1394,7 @@ void copykey(void)
 // millisecond timer, for MuJoCo built-in profiler
 mjtNum timer(void)
 {
-    return (mjtNum)(1000 * ros::Time::now().toSec());
+    return (mjtNum)(1000 * nh->now().seconds());
 }
 
 // clear all times
@@ -1573,10 +1573,10 @@ void uiEvent(mjuiState *state)
                 break;
 
             case 12: //DEBUG mode btn
-                //ROS_INFO("DEBUG mode on ");
+                //RCLCPP_INFO(nh->get_logger(), "DEBUG mode on ");
                 break;
             case 13: //Time check btn
-                //ROS_INFO("Time check on ");
+                //RCLCPP_INFO(nh->get_logger(), "Time check on ");
                 break;
             }
 
@@ -1600,7 +1600,7 @@ void uiEvent(mjuiState *state)
 
             case 2: // Reload
                 settings.loadrequest = 1;
-                ROS_INFO("Reload press %d ", settings.loadrequest);
+                RCLCPP_INFO(nh->get_logger(), "Reload press %d ", settings.loadrequest);
                 break;
 
             case 3: // Align
@@ -1779,7 +1779,7 @@ void uiEvent(mjuiState *state)
             if (m && !settings.run)
             {
                 cleartimers();
-                ros::spinOnce();
+                rclcpp::spin_some(nh);
                 mj_step(m, d);
                 profilerupdate();
                 sensorupdate();
@@ -1792,7 +1792,7 @@ void uiEvent(mjuiState *state)
             {
                 m->opt.timestep = -m->opt.timestep;
                 cleartimers();
-                ros::spinOnce();
+                rclcpp::spin_some(nh);
                 mj_step(m, d);
                 m->opt.timestep = -m->opt.timestep;
                 profilerupdate();
@@ -1807,7 +1807,7 @@ void uiEvent(mjuiState *state)
                 cleartimers();
                 for (i = 0; i < 100; i++)
                 {
-                    ros::spinOnce();
+                    rclcpp::spin_some(nh);
                     mj_step(m, d);
                 }
                 profilerupdate();
@@ -1823,7 +1823,7 @@ void uiEvent(mjuiState *state)
                 cleartimers();
                 for (i = 0; i < 100; i++)
                 {
-                    ros::spinOnce();
+                    rclcpp::spin_some(nh);
                     mj_step(m, d);
                 }
                 m->opt.timestep = -m->opt.timestep;
@@ -2076,7 +2076,7 @@ void prepare(void)
     static double lastupdatetm = 0;
 
     // update interval, save update time
-    double tmnow = ros::Time::now().toSec();
+    double tmnow = nh->now().seconds();
     double interval = tmnow - lastupdatetm;
     interval = mjMIN(1, mjMAX(0.0001, interval));
     lastupdatetm = tmnow;
@@ -2207,12 +2207,12 @@ void render(GLFWwindow *window)
 
             ss[id * 6] = x_f ss[id * 6 + 1] = y_f;
 */
-            tf::Quaternion q_(d->xquat[pert.select * 4 + 1], d->xquat[pert.select * 4 + 2], d->xquat[pert.select * 4 + 3], d->xquat[pert.select * 4]);
-            tf::Matrix3x3 m_(q_);
-            tf::Vector3 global_p_(d->xpos[pert.select * 3], d->xpos[pert.select * 3 + 1], d->xpos[pert.select * 3 + 2]);
-            tf::Vector3 local_p_(pert.localpos[0], pert.localpos[1], pert.localpos[2]);
+            tf2::Quaternion q_(d->xquat[pert.select * 4 + 1], d->xquat[pert.select * 4 + 2], d->xquat[pert.select * 4 + 3], d->xquat[pert.select * 4]);
+            tf2::Matrix3x3 m_(q_);
+            tf2::Vector3 global_p_(d->xpos[pert.select * 3], d->xpos[pert.select * 3 + 1], d->xpos[pert.select * 3 + 2]);
+            tf2::Vector3 local_p_(pert.localpos[0], pert.localpos[1], pert.localpos[2]);
 
-            tf::Vector3 r_ = global_p_ + m_ * local_p_;
+            tf2::Vector3 r_ = global_p_ + m_ * local_p_;
             m_.getRPY(euler(0), euler(1), euler(2));
 
             double radd = 180.0 / 3.141592;
@@ -2237,7 +2237,7 @@ void simulate(void)
     mjtNum simsync = 0;
 
     // run until asked to exit
-    while ((!settings.exitrequest) && ros::ok())
+    while ((!settings.exitrequest) && rclcpp::ok())
     {
 
         // sleep for 1 ms or yield, to let main thread run
@@ -2253,7 +2253,7 @@ void simulate(void)
         if (m)
         {
             // record start time
-            double startwalltm = ros::Time::now().toSec();
+            double startwalltm = nh->now().seconds();
 
             // running
             if (settings.run)
@@ -2263,7 +2263,7 @@ void simulate(void)
                     std::cout << "sim hz check :::::: " << d->time << std::endl;
                 }
                 // record cpu time at start of iteration
-                double tmstart = ros::Time::now().toSec();
+                double tmstart = nh->now().seconds();
 
                 // out-of-sync (for any reason)
                 if (d->time < simsync || tmstart < cpusync || cpusync == 0 ||
@@ -2286,8 +2286,8 @@ void simulate(void)
                 else
                 {
                     // step while simtime lags behind cputime, and within safefactor
-                    while ((d->time - simsync) < (ros::Time::now().toSec() - cpusync) &&
-                           (ros::Time::now().toSec() - tmstart) < refreshfactor / vmode.refreshRate)
+                    while ((d->time - simsync) < (nh->now().seconds() - cpusync) &&
+                           (nh->now().seconds() - tmstart) < refreshfactor / vmode.refreshRate)
                     {
                         // clear old perturbations, apply new
                         mju_zero(d->xfrc_applied, 6 * m->nbody);
@@ -2334,7 +2334,7 @@ void init()
         mju_error("Headers and library have different versions");
 
     // activate MuJoCo license
-    //ROS_INFO("license file located at %s", key_file.c_str());
+    //RCLCPP_INFO(nh->get_logger(), "license file located at %s", key_file.c_str());
     // mj_activate(key_file.c_str());
 
     // init GLFW, set timer callback (milliseconds)

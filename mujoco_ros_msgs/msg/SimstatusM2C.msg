@@ -1,7 +1,7 @@
 #MUJOCO -> CONTROLLER SIM STATUS COMMANDER
 
 
-Header header
+std_msgs/Header header
 float64 time
 
 bool sim_paused

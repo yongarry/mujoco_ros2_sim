@@ -1,10 +1,10 @@
-Header header
+std_msgs/Header header
 float64 time
 
 
-int32 MODE
+int32 mode
 float64[] position
 float64[] torque
 
-# MODE 0 = POSITION
-# MODE 1 = TORQUE
+# mode 0 = POSITION
+# mode 1 = TORQUE

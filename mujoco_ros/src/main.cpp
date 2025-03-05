@@ -17,7 +17,7 @@ void drop(GLFWwindow *window, int count, const char **paths)
     {
         mju_strncpy(filename, paths[0], 1000);
         settings.loadrequest = 1;
-        ROS_INFO("DROP REQUEST");
+        RCLCPP_INFO(nh->get_logger(),"DROP REQUEST");
     }
 }
 
@@ -100,7 +100,7 @@ void loadmodel(void)
     {
         char title[200] = "Simulate : ";
         strcat(title, m->names);
-        strcat(title, ros::this_node::getNamespace().c_str());
+        strcat(title, nh->get_namespace());
         glfwSetWindowTitle(window, title);
     }
 
@@ -118,58 +118,51 @@ void loadmodel(void)
 // run event loop
 int main(int argc, char **argv)
 {
-    // :: ROS CUSTUM :: initialize ros
-    ros::init(argc, argv, "mujoco_ros");
-    ros::NodeHandle nh("~");
-    std::string key_file;
-    nh.param<std::string>("license", key_file, "mjkey.txt");
+    // Initialize ROS 2
+    rclcpp::init(argc, argv);
+    nh = std::make_shared<rclcpp::Node>("mujoco_ros");  // Use nh instead of node
 
-    nh.param("use_shm", use_shm, false);
-    sim_command_sub = nh.subscribe<std_msgs::String>("/mujoco_ros_interface/sim_command_con2sim", 100, sim_command_callback);
-    sim_command_pub = nh.advertise<std_msgs::String>("/mujoco_ros_interface/sim_command_sim2con", 1);
-    force_apply_sub = nh.subscribe("/mujoco_ros_interface/applied_ext_force", 10, &force_apply_callback);
+    // Get parameters
+    std::string key_file = nh->declare_parameter<std::string>("license", "mjkey.txt");
+    use_shm = nh->declare_parameter<bool>("use_shm", false);
+
+    // Create publishers & subscribers
+    sim_command_sub = nh->create_subscription<std_msgs::msg::String>(
+        "/mujoco_ros_interface/sim_command_con2sim", 100,
+        sim_command_callback);
+
+    sim_command_pub = nh->create_publisher<std_msgs::msg::String>(
+        "/mujoco_ros_interface/sim_command_sim2con", 1);
+
+    force_apply_sub = nh->create_subscription<mujoco_ros_msgs::msg::ApplyForce>(
+        "/mujoco_ros_interface/apply_force", 100,
+        force_apply_callback);
 
     if (!use_shm)
-    {        
-        nh.param("pub_mode", pub_total_mode, false);
-        std::cout<<"Name Space: " << ros::this_node::getNamespace() << std::endl;
+    {
+        pub_total_mode = nh->declare_parameter<bool>("pub_mode", false);
+        std::cout << "Name Space: " << nh->get_namespace() << std::endl;
 
-        //register publisher & subscriber
-        char prefix[200] = "/mujoco_ros_interface";
-        char joint_set_name[200];
-        char sim_status_name[200];
-        char joint_state_name[200];
-        char sim_time_name[200];
-        char sensor_state_name[200];
+        std::string prefix = "/mujoco_ros_interface";
+        std::string joint_set_name = prefix + "/joint_set";
+        std::string sim_status_name = prefix + "/sim_status";
+        std::string joint_state_name = prefix + "/joint_states";
+        std::string sim_time_name = prefix + "/sim_time";
+        std::string sensor_state_name = prefix + "/sensor_states";
 
-        strcpy(joint_set_name, prefix);
-        strcpy(sim_status_name, prefix);
-        strcpy(joint_state_name, prefix);
-        strcpy(sim_time_name, prefix);
-        strcpy(sensor_state_name, prefix);
-        if (ros::this_node::getNamespace() != "/")
-        {
-            strcat(joint_set_name, ros::this_node::getNamespace().c_str());
-            strcat(sim_status_name, ros::this_node::getNamespace().c_str());
-            strcat(joint_state_name, ros::this_node::getNamespace().c_str());
-            strcat(sim_time_name, ros::this_node::getNamespace().c_str());
-            strcat(sensor_state_name, ros::this_node::getNamespace().c_str());
-        }
-        strcat(joint_set_name, "/joint_set");
-        strcat(sim_status_name, "/sim_status");
-        strcat(joint_state_name, "/joint_states");
-        strcat(sim_time_name, "/sim_time");
-        strcat(sensor_state_name, "/sensor_states");
-
-        joint_set = nh.subscribe<mujoco_ros_msgs::JointSet>(joint_set_name, 1, jointset_callback, ros::TransportHints().tcpNoDelay(true));
+        joint_set = nh->create_subscription<mujoco_ros_msgs::msg::JointSet>(
+            joint_set_name, 100,
+            jointset_callback);
 
         if (pub_total_mode)
-            sim_status_pub = nh.advertise<mujoco_ros_msgs::SimStatus>(sim_status_name, 1);
+        {
+            sim_status_pub = nh->create_publisher<mujoco_ros_msgs::msg::SimStatus>(sim_status_name, 1);
+        }
         else
         {
-            joint_state_pub = nh.advertise<sensor_msgs::JointState>(joint_state_name, 1);
-            sim_time_pub = nh.advertise<std_msgs::Float32>(sim_time_name, 1);
-            sensor_state_pub = nh.advertise<mujoco_ros_msgs::SensorState>(sensor_state_name, 1);
+            joint_state_pub = nh->create_publisher<sensor_msgs::msg::JointState>(joint_state_name, 1);
+            sim_time_pub = nh->create_publisher<std_msgs::msg::Float32>(sim_time_name, 1);
+            sensor_state_pub = nh->create_publisher<mujoco_ros_msgs::msg::SensorState>(sensor_state_name, 1);
         }
     }
     else
@@ -179,35 +172,35 @@ int main(int argc, char **argv)
 #endif
     }
 
-    //ROS_INFO("ROS initialize complete");
-    sim_time_ros = ros::Duration(0);
-    sim_time_run = ros::Time::now();
-    sim_time_now_ros = ros::Duration(0);
+    // ROS time variables
+    sim_time_ros = rclcpp::Duration(0, 0);
+    sim_time_run = nh->now();
+    sim_time_now_ros = rclcpp::Duration(0, 0);
 
-    // initialize everything
+    // Initialize everything
     init();
 
+    // Load model if parameter is provided
     std::string model_file;
-    // request loadmodel if file given (otherwise drag-and-drop)
-    if (nh.getParam("model_file", model_file))
+    if (nh->get_parameter("model_file", model_file))
     {
         mju_strncpy(filename, model_file.c_str(), 1000);
         settings.loadrequest = 2;
-        ROS_INFO("model is at %s", model_file.c_str());
+        RCLCPP_INFO(nh->get_logger(), "Model is at %s", model_file.c_str());
     }
 
     // start simulation thread
     std::thread simthread(simulate);
 
     // event loop
-    while ((!glfwWindowShouldClose(window) && !settings.exitrequest) && ros::ok())
+    while ((!glfwWindowShouldClose(window) && !settings.exitrequest) && rclcpp::ok())
     {
         // start exclusive access (block simulation thread)
         mtx.lock();
         // load model (not on first pass, to show "loading" label)
         if (settings.loadrequest == 1)
         {
-            ROS_INFO("Load Request");
+            RCLCPP_INFO(nh->get_logger(), "Load Request");
             loadmodel();
         }
         else if (settings.loadrequest > 1)
@@ -243,9 +236,10 @@ int main(int argc, char **argv)
     // deactive MuJoCo
     // mj_deactivate();
 
-    std_msgs::String pmsg;
-    pmsg.data = std::string("terminate");
-    sim_command_pub.publish(pmsg);
+    // Send termination message
+    std_msgs::msg::String pmsg;
+    pmsg.data = "terminate";
+    sim_command_pub->publish(pmsg);
 
 #ifdef COMPILE_SHAREDMEMORY
         deleteSharedMemory(shm_msg_id, mj_shm_);
@@ -255,5 +249,7 @@ int main(int argc, char **argv)
     glfwTerminate();
 #endif
 
+    // Shutdown ROS 2
+    rclcpp::shutdown();
     return 0;
 }

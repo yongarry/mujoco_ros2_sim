@@ -1,37 +1,33 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.5)
 project(mujoco_ros_msgs)
 
-find_package(catkin REQUIRED COMPONENTS
-  message_generation
-  geometry_msgs
-  sensor_msgs
-  std_msgs
+# Find dependencies
+find_package(ament_cmake REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
+
+# Add message files
+set(MSG_FILES
+  "msg/ApplyForce.msg"
+  "msg/JointInit.msg"
+  "msg/JointSet.msg"
+  "msg/JointState.msg"
+  "msg/SensorState.msg"
+  "msg/SensorBase.msg"
+  "msg/SimstatusM2C.msg"
+  "msg/SimStatus.msg"
 )
 
-
-add_message_files(
-  FILES
-  applyforce.msg
-  JointInit.msg
-  JointSet.msg
-  JointState.msg
-  SensorState.msg
-  SensorBase.msg
-  SimstatusM2C.msg
-  SimStatus.msg
+rosidl_generate_interfaces(${PROJECT_NAME}
+  ${MSG_FILES}
+  DEPENDENCIES std_msgs geometry_msgs sensor_msgs
+  ADD_LINTER_TESTS
 )
 
+# Export dependencies
+ament_export_dependencies(rosidl_default_runtime)
 
-generate_messages(
-  DEPENDENCIES std_msgs geometry_msgs
-)
-
-catkin_package(
-  CATKIN_DEPENDS message_runtime std_msgs
-  geometry_msgs
-  sensor_msgs
-)
-
-include_directories(
-  ${catkin_INCLUDE_DIRS}
-)
+# Package settings
+ament_package()

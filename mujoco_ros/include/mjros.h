@@ -13,19 +13,23 @@
 #include <iomanip>
 
 //Ros include
-#include <ros/ros.h>
+#include "rclcpp/rclcpp.hpp"
 #include <Eigen/Dense>
 #include <vector>
-#include <mujoco_ros_msgs/SensorState.h>
-#include <mujoco_ros_msgs/JointSet.h>
-#include <mujoco_ros_msgs/SimStatus.h>
-#include <mujoco_ros_msgs/applyforce.h>
+#include "mujoco_ros_msgs/msg/apply_force.hpp"
+#include "mujoco_ros_msgs/msg/joint_set.hpp"
+#include "mujoco_ros_msgs/msg/sensor_state.hpp"
+#include "mujoco_ros_msgs/msg/sim_status.hpp"
 
-#include <std_msgs/String.h>
-#include <std_msgs/Float32.h>
-#include <std_msgs/Float32MultiArray.h>
-#include <sensor_msgs/JointState.h>
-#include <tf/transform_datatypes.h>
+#include "std_msgs/msg/string.hpp"
+#include "std_msgs/msg/float32.hpp"
+#include "std_msgs/msg/float32_multi_array.hpp"
+#include "sensor_msgs/msg/joint_state.hpp"
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2/LinearMath/Matrix3x3.h>
+
+#include <GLFW/glfw3.h>
 
 #include <deque>
 
@@ -47,33 +51,33 @@ const double syncmisalign = 0.1;  // maximum time mis-alignment before re-sync
 const double refreshfactor = 0.7; // fraction of refresh available for simulation
 
 // model and data
-mjModel *m = NULL;
-mjData *d = NULL;
-char filename[1000] = "";
+inline mjModel *m = NULL;
+inline mjData *d = NULL;
+inline char filename[1000] = "";
 
 // abstract visualization
-mjvScene scn;
-mjvCamera cam;
-mjvOption vopt;
-mjvPerturb pert;
-mjvFigure figconstraint;
-mjvFigure figcost;
-mjvFigure figtimer;
-mjvFigure figsize;
-mjvFigure figsensor;
+inline mjvScene scn;
+inline mjvCamera cam;
+inline mjvOption vopt;
+inline mjvPerturb pert;
+inline mjvFigure figconstraint;
+inline mjvFigure figcost;
+inline mjvFigure figtimer;
+inline mjvFigure figsize;
+inline mjvFigure figsensor;
 
 // OpenGL rendering and UI
-GLFWvidmode vmode;
-int windowpos[2];
-int windowsize[2];
-mjrContext con;
-GLFWwindow *window = NULL;
-mjuiState uistate;
-mjUI ui0, ui1;
+inline GLFWvidmode vmode;
+inline int windowpos[2];
+inline int windowsize[2];
+inline mjrContext con;
+inline GLFWwindow *window = NULL;
+inline mjuiState uistate;
+inline mjUI ui0, ui1;
 
-int key_ui = 0;
+inline int key_ui = 0;
 
-int com_latency = 0;
+inline int com_latency = 0;
 
 // UI settings not contained in MuJoCo structures
 struct setting_
@@ -119,7 +123,7 @@ struct setting_
     int camera = 0;
 };
 
-setting_ settings;
+inline setting_ settings;
 
 // section ids
 enum
@@ -178,7 +182,7 @@ const mjuiDef defOption[] =
         {mjITEM_END}};
 
 // simulation section of UI
-mjuiDef defSimulation[] =
+inline const mjuiDef defSimulation[] =
     {
         {mjITEM_SECTION, "Simulation", 1, NULL, "AS"},
         {mjITEM_RADIO, "", 2, &settings.run, "Pause\nRun"},
@@ -248,8 +252,8 @@ const char help_title[] =
     "Object translate";
 
 // info strings
-char info_title[1000];
-char info_content[1000];
+inline char info_title[1000];
+inline char info_content[1000];
 
 void profilerinit(void);
 void profilerupdate(void);
@@ -282,96 +286,94 @@ void simulate(void);
 void init();
 void rosPollEvents();
 
-std::mutex mtx;
+inline std::mutex mtx;
 
 //---------------ROS Var-----------------------
-ros::Publisher joint_state_pub;
-ros::Publisher sensor_state_pub;
-ros::Subscriber joint_set;
-ros::Subscriber joint_init;
-ros::Subscriber sim_command_sub;
-ros::Publisher sim_command_pub;
-ros::Publisher sim_status_pub;
+inline rclcpp::Node::SharedPtr nh = nullptr;
+inline rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_state_pub;
+inline rclcpp::Publisher<mujoco_ros_msgs::msg::SensorState>::SharedPtr sensor_state_pub;
+inline rclcpp::Subscription<mujoco_ros_msgs::msg::JointSet>::SharedPtr joint_set;
+inline rclcpp::Subscription<mujoco_ros_msgs::msg::JointSet>::SharedPtr joint_init;
+inline rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sim_command_sub;
+inline rclcpp::Publisher<std_msgs::msg::String>::SharedPtr sim_command_pub;
+inline rclcpp::Publisher<mujoco_ros_msgs::msg::SimStatus>::SharedPtr sim_status_pub;
 
 // apply external force
-ros::Subscriber force_apply_sub;
-// std_msgs::Float32MultiArray ext_force_msg_;
-mujoco_ros_msgs::applyforce ext_force_msg_;
-bool ext_force_applied_ = false;
-std::vector<float> applied_ext_force_;
-unsigned int force_appiedd_link_idx_;
-mjvGeom* arrow;
+inline rclcpp::Subscription<mujoco_ros_msgs::msg::ApplyForce>::SharedPtr force_apply_sub;
+
+// std_msgs::msg::Float32MultiArray ext_force_msg_;
+inline mujoco_ros_msgs::msg::ApplyForce ext_force_msg_;
+inline bool ext_force_applied_ = false;
+inline std::vector<float> applied_ext_force_;
+inline unsigned int force_appiedd_link_idx_;
+inline mjvGeom* arrow;
 void arrowshow(mjvGeom* arrow);
 void makeArrow(mjvGeom* arrow);
-void force_apply_callback(const mujoco_ros_msgs::applyforce &msg);
+void force_apply_callback(const mujoco_ros_msgs::msg::ApplyForce::SharedPtr msg);
 
-//mujoco_ros_msgs::JointState joint_state_msg_;
-//mujoco_ros_msgs::JointSet joint_set_msg_;
-mujoco_ros_msgs::SensorState sensor_state_msg_;
-mujoco_ros_msgs::SimStatus sim_status_msg_;
-sensor_msgs::JointState joint_state_msg_;
-//sensor_msgs::JointState joint_set_msg_;
-mujoco_ros_msgs::JointSet joint_set_msg_;
-std_msgs::Float32 sim_time;
-ros::Publisher sim_time_pub;
+inline mujoco_ros_msgs::msg::SensorState sensor_state_msg_;
+inline mujoco_ros_msgs::msg::SimStatus sim_status_msg_;
+inline sensor_msgs::msg::JointState joint_state_msg_;
+inline mujoco_ros_msgs::msg::JointSet joint_set_msg_;
+inline std_msgs::msg::Float32 sim_time;
+inline rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr sim_time_pub;
 
-std::vector<float> command;
-std::vector<float> command2;
+inline std::vector<float> command;
+inline std::vector<float> command2;
 
-int loadmodel_request = 0;
+inline int loadmodel_request = 0;
 
-bool ros_time_sync_reset;
+inline bool ros_time_sync_reset;
 
 //reset start time
-bool ros_sim_started = true;
-bool controller_reset_check = true;
-bool controller_init_check = true;
-bool reset_request = false;
+inline bool ros_sim_started = true;
+inline bool controller_reset_check = true;
+inline bool controller_init_check = true;
+inline bool reset_request = false;
 
-bool pause_check = true;
+inline bool pause_check = true;
 
-bool pub_total_mode = false;
+inline bool pub_total_mode = false;
 
-bool use_shm = false;
+inline bool use_shm = false;
 
 //bool for custom applied force
-bool custom_ft_applied = false;
+inline bool custom_ft_applied = false;
 
-ros::Duration sim_time_ros;
-ros::Time sim_time_run;
+inline rclcpp::Duration sim_time_ros{0, 0};
+inline rclcpp::Time sim_time_run;
 
-ros::Duration sim_time_now_ros;
+inline rclcpp::Duration sim_time_now_ros{0, 0};
 
-ros::Duration ros_sim_runtime;
-ros::Time sync_time_test;
+inline rclcpp::Duration ros_sim_runtime{0, 0};
+inline rclcpp::Time sync_time_test;
 
-std::string ctrlstat = "Missing";
+inline std::string ctrlstat = "Missing";
 
-std::vector<float> ctrl_command_temp_;
+inline std::vector<float> ctrl_command_temp_;
 
-std::deque<std::vector<float>> ctrl_cmd_que_;
+inline std::deque<std::vector<float>> ctrl_cmd_que_;
 
-mjtNum *ctrl_command;
-mjtNum *ctrl_command2;
+inline mjtNum *ctrl_command;
+inline mjtNum *ctrl_command2;
 
-bool cmd_rcv = false;
+inline bool cmd_rcv = false;
 
 // user state for pub
 
-float com_time;
-float dif_time;
+inline float com_time;
+inline float dif_time;
 
-double t_bf = 0;
+inline double t_bf = 0;
 
-double sim_cons_time = 0;
+inline double sim_cons_time = 0;
 //void c_pause();
 //void c_slowmotion();
 void c_reset();
 
 //---------------------callback functions --------------------------------
-
-void jointset_callback(const mujoco_ros_msgs::JointSetConstPtr &msg);
-void sim_command_callback(const std_msgs::StringConstPtr &msg);
+void jointset_callback(const mujoco_ros_msgs::msg::JointSet::SharedPtr msg);
+void sim_command_callback(const std_msgs::msg::String::SharedPtr msg);
 void state_publisher_init();
 void state_publisher();
 void mujoco_ros_connector_init();
